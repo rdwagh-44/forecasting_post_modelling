@@ -1,6 +1,10 @@
 import axios from 'axios'
 
-const api = axios.create({ baseURL: '/api' })
+// For local dev: '/api' (uses Vite proxy)
+// For ngrok sharing: replace with your ngrok backend URL e.g. 'https://abc123.ngrok-free.app'
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '/api'
+
+const api = axios.create({ baseURL: BACKEND_URL })
 
 export const uploadDataset   = (file) => { const f = new FormData(); f.append('file', file); return api.post('/upload/dataset', f) }
 export const uploadElasticity = (file) => { const f = new FormData(); f.append('file', file); return api.post('/upload/elasticity', f) }

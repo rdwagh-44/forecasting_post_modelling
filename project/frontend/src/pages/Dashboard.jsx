@@ -20,7 +20,6 @@ const TABS = [
   { id: 'overview',  label: '🔍 Overview' },
   { id: 'growth',    label: '📈 Growth Rates' },
   { id: 'forecast',  label: '📊 Volume Forecast' },
-  { id: 'waterfall', label: '🌊 Waterfall' },
 ]
 
 const s = {
@@ -63,6 +62,16 @@ const s = {
   placeholder: { textAlign: 'center', padding: '48px 20px', color: C.ochreDim, fontSize: 14 }
 }
 
+const cleanVarName = (v) => v.replace(/^(Res_|Lag_|lag_)/g, '').trim()
+const toFY = (s) => typeof s === 'string' ? s.replace(/\bA(\d+)\b/g, 'FY$1') : s
+
+const SCENARIO_LABELS = {
+  'Base Elasticity': 'Realistic Forecast',
+  '+10% Elasticity': 'Optimistic Forecast',
+  '-10% Elasticity': 'Conservative Forecast'
+}
+const labelScenario = (s) => SCENARIO_LABELS[s] || s
+
 function presenceCellStyle(col, val) {
   if (col === 'Variable') return { fontWeight: 600, color: C.ochre }
   if (val === '✓') return { color: '#16a34a', fontWeight: 700, fontSize: 15, background: 'rgba(22,163,74,0.12)', textAlign: 'center' }
@@ -85,6 +94,7 @@ export default function Dashboard() {
   const [historicalError, setHistoricalError] = useState('')
   const [forecastResult, setForecastResult] = useState(null)
   const [cagrYears, setCagrYears] = useState(3)
+  const [scenarioTab, setScenarioTab] = useState('Base Elasticity')
   const [loading, setLoading] = useState(false)
   const [variables, setVariables] = useState([])
   const [selectedVars, setSelectedVars] = useState([])
@@ -185,32 +195,32 @@ export default function Dashboard() {
     })
 
     const traces = [
-      // Historical growth — indigo dotted
+      // Historical growth — indigo solid
       {
         x: histYears, y: getGrowthY(histYears),
         mode: 'lines+markers', type: 'scatter',
         name: 'Growth Rate (%)',
-        yaxis: 'y', line: { dash: 'dot', color: '#4f46e5' },
+        yaxis: 'y', line: { dash: 'solid', color: '#4f46e5', width: 2 },
         marker: { color: '#4f46e5', size: 6 },
         connectgaps: false
       }
     ]
 
-    // Future growth — orange dotted (only if future years exist)
+    // Future growth — same indigo, dotted
     if (futureYears.length > 0) {
       const futureX = bridgeYear ? [bridgeYear, ...futureYears] : futureYears
       const futureY = getGrowthY(futureX)
       traces.push({
         x: futureX, y: futureY,
         mode: 'lines+markers', type: 'scatter',
-        name: 'Growth Rate — Future (A26+)',
-        yaxis: 'y', line: { dash: 'dot', color: '#f59e0b' },
-        marker: { color: '#f59e0b', size: 6 },
+        name: 'Growth Rate — Future (FY26+)',
+        yaxis: 'y', line: { dash: 'dot', color: '#4f46e5', width: 2 },
+        marker: { color: '#4f46e5', size: 6 },
         connectgaps: false
       })
     }
 
-    // Values trace — split into historical (teal) and future (orange, same as forecast growth)
+    // Values trace — historical teal solid, future teal dotted
     if (valueCols.length > 0) {
       const histValYears = allYears.filter(yr => parseInt(yr.slice(1)) <= FUTURE_FROM - 1)
       const futureValYears = allYears.filter(yr => parseInt(yr.slice(1)) >= FUTURE_FROM)
@@ -237,9 +247,9 @@ export default function Dashboard() {
           traces.push({
             x: futureValX, y: futureValY,
             mode: 'lines+markers', type: 'scatter',
-            name: 'Value — Future (A26+)', yaxis: 'y2',
-            line: { dash: 'solid', width: 2.5, color: '#f59e0b' },
-            marker: { color: '#f59e0b', size: 6 },
+            name: 'Value — Future (FY26+)', yaxis: 'y2',
+            line: { dash: 'dot', width: 2.5, color: '#06b6d4' },
+            marker: { color: '#06b6d4', size: 6 },
             connectgaps: false
           })
       }
@@ -248,11 +258,10 @@ export default function Dashboard() {
     return traces
   }, [selectedGrowthRow, editedGrowthData, growthCols, valueCols])
 
-  const forecastChartData = useCallback(() => {
+  const forecastChartData = useCallback((filterScenario = null) => {
     if (!forecastResult?.plot_data) return []
     const FUTURE_FROM = 26
 
-    // Each scenario gets distinct colors for Growth and Volume lines
     const scenarioPalette = {
       'Base Elasticity':  { growth: '#4f46e5', volume: '#06b6d4', growthFuture: '#a78bfa', volumeFuture: '#67e8f9' },
       '+10% Elasticity':  { growth: '#10b981', volume: '#f59e0b', growthFuture: '#6ee7b7', volumeFuture: '#fcd34d' },
@@ -260,7 +269,8 @@ export default function Dashboard() {
     }
     const fallback = { growth: '#4f46e5', volume: '#06b6d4', growthFuture: '#a78bfa', volumeFuture: '#67e8f9' }
 
-    const scenarios = [...new Set(forecastResult.plot_data.map(d => d.Scenario))]
+    const allScenarios = [...new Set(forecastResult.plot_data.map(d => d.Scenario))]
+    const scenarios = filterScenario ? allScenarios.filter(s => s === filterScenario) : allScenarios
 
     return scenarios.flatMap(sc => {
       const rows = forecastResult.plot_data.filter(d => d.Scenario === sc)
@@ -275,12 +285,12 @@ export default function Dashboard() {
       const traces = []
 
       if (histRows.length > 0) {
-        traces.push({ x: histRows.map(r => r.FiscalYear), y: histRows.map(r => r['VolumeGrowth_%']), mode: 'lines+markers', name: `${sc} Growth`, type: 'scatter', line: { color: p.growth, width: 2 }, marker: { color: p.growth } })
-        traces.push({ x: histRows.map(r => r.FiscalYear), y: histRows.map(r => r.PredictedVolume), mode: 'lines+markers', name: `${sc} Volume`, type: 'scatter', line: { color: p.volume, width: 2, dash: 'dot' }, marker: { color: p.volume }, yaxis: 'y2' })
+        traces.push({ x: histRows.map(r => r.FiscalYear), y: histRows.map(r => r['VolumeGrowth_%']), mode: 'lines+markers', name: `${labelScenario(sc)} Growth`, type: 'scatter', line: { color: p.growth, width: 2, dash: 'solid' }, marker: { color: p.growth } })
+        traces.push({ x: histRows.map(r => r.FiscalYear), y: histRows.map(r => r.PredictedVolume), mode: 'lines+markers', name: `${labelScenario(sc)} Volume`, type: 'scatter', line: { color: p.volume, width: 2, dash: 'solid' }, marker: { color: p.volume }, yaxis: 'y2' })
       }
       if (futureWithBridge.length > 0) {
-        traces.push({ x: futureWithBridge.map(r => r.FiscalYear), y: futureWithBridge.map(r => r['VolumeGrowth_%']), mode: 'lines+markers', name: `${sc} Growth (Future)`, type: 'scatter', line: { color: p.growthFuture, width: 2, dash: 'dot' }, marker: { color: p.growthFuture } })
-        traces.push({ x: futureWithBridge.map(r => r.FiscalYear), y: futureWithBridge.map(r => r.PredictedVolume), mode: 'lines+markers', name: `${sc} Volume (Future)`, type: 'scatter', line: { color: p.volumeFuture, width: 2, dash: 'dot' }, marker: { color: p.volumeFuture }, yaxis: 'y2' })
+        traces.push({ x: futureWithBridge.map(r => r.FiscalYear), y: futureWithBridge.map(r => r['VolumeGrowth_%']), mode: 'lines+markers', name: `${labelScenario(sc)} Growth (Future)`, type: 'scatter', line: { color: p.growth, width: 2, dash: 'dot' }, marker: { color: p.growth } })
+        traces.push({ x: futureWithBridge.map(r => r.FiscalYear), y: futureWithBridge.map(r => r.PredictedVolume), mode: 'lines+markers', name: `${labelScenario(sc)} Volume (Future)`, type: 'scatter', line: { color: p.volume, width: 2, dash: 'dot' }, marker: { color: p.volume }, yaxis: 'y2' })
       }
 
       return traces
@@ -301,9 +311,13 @@ export default function Dashboard() {
   const SegmentBar = () => (
     <div style={s.segmentBar}>
       <span style={{ fontWeight: 600, fontSize: 14, color: C.ochre }}>Segment:</span>
-      <select style={s.select} value={selectedSegment} onChange={e => setSelectedSegment(e.target.value)}>
+      <select style={s.select} value={selectedSegment} onChange={e => { setSelectedSegment(e.target.value); setForecastResult(null); setWaterfallResult(null) }}>
         <option value="">— Select a segment —</option>
-        {segments.map(seg => <option key={seg} value={seg}>{seg}</option>)}
+        {[...segments].sort((a, b) => {
+          const order = ['Value', 'Deluxe', 'Premium', 'Super-premium']
+          const ai = order.indexOf(a); const bi = order.indexOf(b)
+          return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi)
+        }).map(seg => <option key={seg} value={seg}>{seg}</option>)}
       </select>
       {selectedSegment && <span style={s.badge}>{selectedSegment}</span>}
     </div>
@@ -363,7 +377,7 @@ export default function Dashboard() {
                         border: active ? '1px solid #4f46e5' : '1px solid #e2e8f0',
                         boxShadow: active ? '0 2px 6px rgba(79,70,229,0.3)' : 'none'
                       }}>
-                      {row.Variable}
+                      {cleanVarName(row.Variable)}
                     </span>
                   )
                 })}
@@ -375,9 +389,9 @@ export default function Dashboard() {
               <div style={s.card}>
                 <DataTable
                   data={editedGrowthData.map(row => {
-                    const r = { Segment: row.Segment, Variable: row.Variable }
+                    const r = { Segment: row.Segment, Variable: cleanVarName(row.Variable) }
                     growthCols.filter(c => parseInt(c.split(' ')[0].slice(1)) >= 25).forEach(c => {
-                      r[c] = row[c] != null ? `${parseFloat(row[c]).toFixed(1)}%` : '-'
+                      r[toFY(c)] = row[c] != null ? `${parseFloat(row[c]).toFixed(1)}%` : '-'
                     })
                     return r
                   })}
@@ -391,7 +405,7 @@ export default function Dashboard() {
                 {historicalError
                   ? <p style={{ color: '#dc2626', fontSize: 13 }}>⚠ {historicalError}</p>
                   : <DataTable maxHeight="280px" data={historicalGrowth.map(r => ({
-                      Segment: r.Segment, FiscalYear: r.FiscalYear,
+                      Segment: r.Segment, FiscalYear: toFY(r.FiscalYear),
                       PredictedVolume: r.PredictedVolume != null ? parseFloat(r.PredictedVolume).toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '-',
                       'VolumeGrowth_%': r['VolumeGrowth_%'] != null ? parseFloat(r['VolumeGrowth_%']).toFixed(1) + '%' : '-',
                       Scenario: r.Scenario
@@ -418,18 +432,40 @@ export default function Dashboard() {
             </div>
 
             {forecastResult && (<>
+              {/* ── Scenario Sub-tabs ── */}
+              {(() => {
+                const scenarios = ['Base Elasticity', '+10% Elasticity', '-10% Elasticity']
+                const scColors = { 'Base Elasticity': '#4f46e5', '+10% Elasticity': '#10b981', '-10% Elasticity': '#ef4444' }
+                return (
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 20, borderBottom: '2px solid #e2e8f0', paddingBottom: 0 }}>
+                    {scenarios.map(sc => {
+                      const active = scenarioTab === sc
+                      return (
+                        <button key={sc} onClick={() => setScenarioTab(sc)} style={{
+                          padding: '8px 20px', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 700,
+                          background: active ? '#fff' : 'transparent',
+                          color: active ? scColors[sc] : '#718096',
+                          borderBottom: active ? `3px solid ${scColors[sc]}` : '3px solid transparent',
+                          borderRadius: '6px 6px 0 0', marginBottom: -2, transition: 'all 0.15s'
+                        }}>{labelScenario(sc)}</button>
+                      )
+                    })}
+                  </div>
+                )
+              })()}
+
               {/* ── KPI Cards ── */}
               {(() => {
-                const baseRows = forecastResult.final_df?.filter(r => r.Scenario === 'Base Elasticity' && r.FiscalYear !== 'A26') || []
-                const cagrRow = forecastResult.cagr?.table?.find(r => r.Scenario === 'Base Elasticity')
+                const baseRows = forecastResult.final_df?.filter(r => r.Scenario === scenarioTab && r.FiscalYear !== 'A26') || []
+                const cagrRow = forecastResult.cagr?.table?.find(r => r.Scenario === scenarioTab)
                 const cagrKey = cagrRow ? Object.keys(cagrRow).find(k => k.includes('CAGR')) : null
                 const kpis = [
                   ...baseRows.map(r => ({
-                    label: r.FiscalYear,
+                    label: toFY(r.FiscalYear),
                     value: r['VolumeGrowth_%'] != null ? `${parseFloat(r['VolumeGrowth_%']).toFixed(1)}%` : '-',
                     sub: r.PredictedVolume != null ? parseFloat(r.PredictedVolume).toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '-'
                   })),
-                  ...(cagrRow && cagrKey ? [{ label: cagrKey, value: `${parseFloat(cagrRow[cagrKey]).toFixed(1)}%`, sub: 'Base Elasticity', isCAGR: true }] : [])
+                  ...(cagrRow && cagrKey ? [{ label: cagrKey, value: `${parseFloat(cagrRow[cagrKey]).toFixed(1)}%`, sub: labelScenario(scenarioTab), isCAGR: true }] : [])
                 ]
                 if (!kpis.length) return null
                 return (
@@ -441,42 +477,22 @@ export default function Dashboard() {
                         border: k.isCAGR ? '2px solid #4f46e5' : '1px solid #e2e8f0',
                         boxShadow: '0 2px 8px rgba(0,0,0,0.06)', textAlign: 'center'
                       }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: k.isCAGR ? '#818cf8' : '#718096', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>{k.label}</div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: k.isCAGR ? '#818cf8' : '#718096', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>{k.label}</div>
                         <div style={{ fontSize: 26, fontWeight: 800, color: k.isCAGR ? '#fff' : (parseFloat(k.value) >= 0 ? '#10b981' : '#ef4444'), lineHeight: 1 }}>{k.value}</div>
-                        <div style={{ fontSize: 11, color: k.isCAGR ? '#818cf8' : '#a0aec0', marginTop: 5 }}>{k.sub}</div>
+                        <div style={{ fontSize: 13, color: k.isCAGR ? '#818cf8' : '#a0aec0', marginTop: 5 }}>{k.sub}</div>
                       </div>
                     ))}
                   </div>
                 )
               })()}
 
-              <ExpanderSection title="📊 CAGR Settings" defaultOpen>
-                <SliderControl
-                  label="Select number of years for CAGR"
-                  min={2} max={forecastResult.cagr?.max_years || 4}
-                  value={cagrYears}
-                  onChange={v => { setCagrYears(v); handleRunForecast() }}
-                />
-              </ExpanderSection>
 
-              <div style={s.section}>
-                <div style={s.sectionTitle}>🎯 Volume Forecast Growth Summary (CAGR)</div>
-                <div style={s.card}>
-                  <DataTable data={(forecastResult.cagr?.table || []).map(row => {
-                    const r = {}
-                    Object.entries(row).forEach(([k, v]) => {
-                      r[k] = (typeof v === 'number') ? `${v.toFixed(1)}%` : v
-                    })
-                    return r
-                  })} />
-                </div>
-              </div>
 
               <div style={s.section}>
                 <div style={s.sectionTitle}>📉 Historical + Forecast — Growth & Volume Scenarios</div>
                 <div style={s.card}>
                   <ChartPanel
-                    data={forecastChartData()}
+                    data={forecastChartData(scenarioTab)}
                     layout={{
                       title: { text: 'Historical + Forecast Growth & Volume Scenarios', font: { size: 14, color: C.ochre } },
                       xaxis: { title: { text: 'Fiscal Year' } },
@@ -493,6 +509,8 @@ export default function Dashboard() {
                 <ExpanderSection title="⚡ Forecast Comparison (Elasticity Scenarios)" defaultOpen={false}>
                   <DataTable maxHeight="300px" data={forecastResult.forecast_scenarios.map(r => ({
                     ...r,
+                    Scenario: labelScenario(r.Scenario),
+                    FiscalYear: toFY(r.FiscalYear),
                     PredictedVolume: parseFloat(r.PredictedVolume).toLocaleString('en-IN', { maximumFractionDigits: 0 }),
                     'VolumeGrowth_%': parseFloat(r['VolumeGrowth_%']).toFixed(1) + '%'
                   }))} />
@@ -501,87 +519,74 @@ export default function Dashboard() {
 
               <div style={s.section}>
                 <ExpanderSection title="📈 Forecasted Volumes & Growth Rates" defaultOpen={false}>
-                  <DataTable data={forecastResult.final_df} maxHeight="300px" />
+                  <DataTable data={forecastResult.final_df.map(r => ({ ...r, Scenario: labelScenario(r.Scenario), FiscalYear: toFY(r.FiscalYear) }))} maxHeight="300px" />
                 </ExpanderSection>
               </div>
+
+              {/* ── Waterfall ── */}
+              <ExpanderSection title="🌊 Waterfall Configuration" defaultOpen={false}>
+                <div style={s.row}>
+                  <div style={s.col}>
+                    <label style={{ fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 4, color: C.ochre }}>Start Fiscal Year</label>
+                    <select style={s.select} value={wfStartFy} onChange={e => { setWfStartFy(e.target.value) }}>
+                      {forecastYears.map(y => <option key={y} value={y}>{toFY(y)}</option>)}
+                    </select>
+                    <div style={{ marginTop: 16 }}>
+                      <label style={{ fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 8, color: C.ochre }}>Variables to include</label>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+                        {variables.map(v => {
+                          const active = selectedVars.includes(v)
+                          return (
+                            <span key={v}
+                              onClick={() => { setSelectedVars(prev => active ? prev.filter(x => x !== v) : [...prev, v]) }}
+                              style={{
+                                padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600,
+                                cursor: 'pointer', userSelect: 'none', transition: 'all 0.15s',
+                                background: active ? '#4f46e5' : '#f0f2f8',
+                                color: active ? '#fff' : '#4a5568',
+                                border: active ? '1px solid #4f46e5' : '1px solid #e2e8f0',
+                                boxShadow: active ? '0 2px 6px rgba(79,70,229,0.3)' : 'none'
+                              }}>
+                              {v}
+                            </span>
+                          )
+                        })}
+                      </div>
+                      <div style={{ marginTop: 8, display: 'flex', gap: 12 }}>
+                        <span onClick={() => { setSelectedVars([...variables]) }} style={{ fontSize: 11, color: '#4f46e5', cursor: 'pointer', textDecoration: 'underline' }}>Select all</span>
+                        <span onClick={() => { setSelectedVars([]) }} style={{ fontSize: 11, color: '#718096', cursor: 'pointer', textDecoration: 'underline' }}>Clear all</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div style={s.col}>
+                    <label style={{ fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 4, color: C.ochre }}>End Fiscal Year</label>
+                    <select style={s.select} value={wfEndFy} onChange={e => { setWfEndFy(e.target.value) }}>
+                      {forecastYears.map(y => <option key={y} value={y}>{toFY(y)}</option>)}
+                    </select>
+                    <div style={{ marginTop: 16 }}>
+                      <SliderControl label="Emphasize variable contribution" min={1.0} max={3.0} step={0.1} value={variableScale} onChange={v => { setVariableScale(v) }} />
+                    </div>
+                  </div>
+                </div>
+                <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span style={{ fontSize: 13, color: C.ochreDim }}>{toFY(wfStartFy)} → {toFY(wfEndFy)}</span>
+                  <button style={s.btn} onClick={handleRunWaterfall}>Generate Waterfall</button>
+                </div>
+              </ExpanderSection>
+
+              {waterfallResult && (
+                <div style={{ ...s.card, marginTop: 16 }}>
+                  <ChartPanel
+                    data={waterfallChartData()}
+                    layout={{
+                      title: { text: `Volume Growth Waterfall — ${selectedSegment} (Elasticity × Growth)`, font: { size: 14, color: C.ochre } },
+                      yaxis: { showticklabels: false, zeroline: true },
+                      showlegend: false, height: 600
+                    }}
+                  />
+                </div>
+              )}
             </>)}
-          </>)}
-        </div>
-      )}
-
-      {/* ── TAB 4: Waterfall ── */}
-      {activeTab === 'waterfall' && (
-        <div style={s.tabContent}>
-          <SegmentBar />
-          {!selectedSegment ? (
-            <div style={{ ...s.card, ...s.placeholder }}>☝ Select a segment and run forecast first</div>
-          ) : !forecastResult ? (
-            <div style={{ ...s.card, ...s.placeholder }}>
-              Run the forecast in the "Volume Forecast" tab first, then come back here.
-            </div>
-          ) : (<>
-            <ExpanderSection title="⚙ Waterfall Configuration" defaultOpen>
-              <div style={s.row}>
-                <div style={s.col}>
-                  <label style={{ fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 4, color: C.ochre }}>Start Fiscal Year</label>
-                  <select style={s.select} value={wfStartFy} onChange={e => { setWfStartFy(e.target.value) }}>
-                    {forecastYears.map(y => <option key={y} value={y}>{y}</option>)}
-                  </select>
-                  <div style={{ marginTop: 16 }}>
-                    <label style={{ fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 8, color: C.ochre }}>Variables to include</label>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
-                      {variables.map(v => {
-                        const active = selectedVars.includes(v)
-                        return (
-                          <span key={v}
-                            onClick={() => { setSelectedVars(prev => active ? prev.filter(x => x !== v) : [...prev, v]) }}
-                            style={{
-                              padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600,
-                              cursor: 'pointer', userSelect: 'none', transition: 'all 0.15s',
-                              background: active ? '#4f46e5' : '#f0f2f8',
-                              color: active ? '#fff' : '#4a5568',
-                              border: active ? '1px solid #4f46e5' : '1px solid #e2e8f0',
-                              boxShadow: active ? '0 2px 6px rgba(79,70,229,0.3)' : 'none'
-                            }}>
-                            {v}
-                          </span>
-                        )
-                      })}
-                    </div>
-                    <div style={{ marginTop: 8, display: 'flex', gap: 12 }}>
-                      <span onClick={() => { setSelectedVars([...variables]) }} style={{ fontSize: 11, color: '#4f46e5', cursor: 'pointer', textDecoration: 'underline' }}>Select all</span>
-                      <span onClick={() => { setSelectedVars([]) }} style={{ fontSize: 11, color: '#718096', cursor: 'pointer', textDecoration: 'underline' }}>Clear all</span>
-                    </div>
-                  </div>
-                </div>
-                <div style={s.col}>
-                  <label style={{ fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 4, color: C.ochre }}>End Fiscal Year</label>
-                  <select style={s.select} value={wfEndFy} onChange={e => { setWfEndFy(e.target.value) }}>
-                    {forecastYears.map(y => <option key={y} value={y}>{y}</option>)}
-                  </select>
-                  <div style={{ marginTop: 16 }}>
-                    <SliderControl label="Emphasize variable contribution" min={1.0} max={3.0} step={0.1} value={variableScale} onChange={v => { setVariableScale(v) }} />
-                  </div>
-                </div>
-              </div>
-              <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-                <span style={{ fontSize: 13, color: C.ochreDim }}>{wfStartFy} → {wfEndFy}</span>
-                <button style={s.btn} onClick={handleRunWaterfall}>Generate Waterfall</button>
-              </div>
-            </ExpanderSection>
-
-            {waterfallResult && (
-              <div style={{ ...s.card, marginTop: 16 }}>
-                <ChartPanel
-                  data={waterfallChartData()}
-                  layout={{
-                    title: { text: 'Volume Growth Waterfall (Elasticity × Growth)', font: { size: 14, color: C.ochre } },
-                    yaxis: { showticklabels: false, zeroline: true },
-                    showlegend: false, height: 600
-                  }}
-                />
-              </div>
-            )}
           </>)}
         </div>
       )}
@@ -594,7 +599,7 @@ export default function Dashboard() {
             onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
               <div>
-                <div style={{ fontSize: 18, fontWeight: 800, color: '#1a1a2e' }}>📈 {growthData[selectedGrowthRow].Variable}</div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: '#1a1a2e' }}>📈 {cleanVarName(growthData[selectedGrowthRow].Variable)}</div>
                 <div style={{ fontSize: 12, color: '#718096', marginTop: 3 }}>Segment: {growthData[selectedGrowthRow].Segment}</div>
               </div>
               <button onClick={() => setSelectedGrowthRow(null)}
@@ -612,7 +617,7 @@ export default function Dashboard() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10 }}>
                 {growthCols.filter(c => parseInt(c.split(' ')[0].slice(1)) >= 26).map(col => (
                   <div key={col} style={{ background: '#f8f9ff', borderRadius: 8, padding: '10px 12px', border: '1px solid #e8ecf4' }}>
-                    <div style={{ fontSize: 11, color: '#718096', marginBottom: 5, fontWeight: 600 }}>{col}</div>
+                    <div style={{ fontSize: 11, color: '#718096', marginBottom: 5, fontWeight: 600 }}>{toFY(col)}</div>
                     <input type="number" style={{ width: '100%', padding: '5px 8px', border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 12, background: '#fff', color: '#2d3748' }}
                       value={editedGrowthData[selectedGrowthRow]?.[col] ?? ''}
                       onChange={e => handleGrowthEdit(selectedGrowthRow, col, e.target.value)} />

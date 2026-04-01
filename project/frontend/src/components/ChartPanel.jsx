@@ -26,7 +26,7 @@ function CustomTooltip({ active, payload, label }) {
 }
 
 // ── Waterfall bar chart using Recharts Bar ────────────────────
-const cleanLabel = (s) => s.replace(/^(Res_|Lag_|lag_)/g, '').trim()
+const cleanLabel = (s) => s.replace(/^(Res_|Lag_|lag_)/g, '').replace(/\bA(\d+)\b/g, 'FY$1').trim()
 function WaterfallChart({ data, height }) {
   // data: array of { Label, Type, DisplayValue, LabelText }
   // Build running base for stacked invisible bar
@@ -110,18 +110,19 @@ export default function ChartPanel({ data, layout, style }) {
     )
   }
 
+  const toFY = (s) => typeof s === 'string' ? s.replace(/\bA(\d+)\b/g, 'FY$1') : s
+
   // Build unified x-axis from all traces
   const allX = [...new Set(data.flatMap(t => t.x || []))]
     .sort((a, b) => {
-      // Try numeric sort for fiscal years like A19, A20, FY25 etc
       const na = parseInt(String(a).replace(/\D/g, ''))
       const nb = parseInt(String(b).replace(/\D/g, ''))
       return isNaN(na) || isNaN(nb) ? String(a).localeCompare(String(b)) : na - nb
     })
 
-  // Convert to recharts row format: { x, trace0, trace1, ... }
+  // Convert to recharts row format with FY labels
   const chartData = allX.map(x => {
-    const row = { x }
+    const row = { x: toFY(x) }
     data.forEach((trace, i) => {
       const idx = (trace.x || []).indexOf(x)
       row[`t${i}`] = idx >= 0 && trace.y[idx] != null ? trace.y[idx] : null

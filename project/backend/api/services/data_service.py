@@ -44,7 +44,21 @@ def load_default_dataset(path: str) -> pd.DataFrame:
 
 def build_presence_table(elasticity_df: pd.DataFrame) -> dict:
     presence_df = elasticity_df.copy()
+
+    # Filter out unwanted variables
+    exclude = ['Seasonality', 'Trend']
+    presence_df = presence_df[
+        ~presence_df['Variable'].isin(exclude) &
+        ~presence_df['Variable'].str.startswith('Res_Vol_')
+    ]
+
+    # Clean display names: remove Res_, Lag_, lag_ prefixes
+    def clean_name(v):
+        return v.replace('Res_', '').replace('Lag_', '').replace('lag_', '').strip()
+
+    presence_df['Variable'] = presence_df['Variable'].apply(clean_name)
     presence_df["Present"] = "✓"
+
     table = (
         presence_df
         .pivot_table(index="Variable", columns="Segment", values="Present", aggfunc="first")
