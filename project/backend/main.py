@@ -28,6 +28,9 @@ app.add_middleware(
 DEFAULT_DATASET = "dataset_df.xlsx"
 DEFAULT_ELASTICITY = "elasticity_df.xlsx"
 DEFAULT_GROWTH = "growth_df.xlsx"
+DEFAULT_VOLUME_FORECAST = "Volume_forecast_df.xlsx"
+DEFAULT_FEATURE_LIST = "Feature list for forecasting tool.xlsx"
+DEFAULT_CONSOLIDATED = "Consolidated_Features.xlsx"
 
 # In-memory store (per-session state is managed on frontend; server holds last loaded data)
 _store = {}
@@ -41,6 +44,12 @@ def _load_defaults():
         _store["elasticity_df"] = pd.read_excel(DEFAULT_ELASTICITY)
     if os.path.exists(DEFAULT_GROWTH):
         _store["growth_df"] = pd.read_excel(DEFAULT_GROWTH)
+    if os.path.exists(DEFAULT_VOLUME_FORECAST):
+        _store["volume_forecast_df"] = pd.read_excel(DEFAULT_VOLUME_FORECAST)
+    if os.path.exists(DEFAULT_FEATURE_LIST):
+        _store["feature_list_df"] = pd.read_excel(DEFAULT_FEATURE_LIST)
+    if os.path.exists(DEFAULT_CONSOLIDATED):
+        _store["consolidated_df"] = pd.read_excel(DEFAULT_CONSOLIDATED)
 
 
 _load_defaults()
@@ -295,3 +304,92 @@ def get_variables(segment: str):
     exclude = ["Seasonality", "Trend"]
     vars_ = sorted(v for v in seg_e["Variable"].unique().tolist() if v not in exclude)
     return {"variables": vars_}
+
+
+# ─────────────────────────────────────────────
+# Volume Overview endpoints
+# ─────────────────────────────────────────────
+
+@app.get("/volume-overview/segments")
+def get_volume_overview_segments():
+    df = _store.get("volume_forecast_df")
+    if df is None:
+        raise HTTPException(404, "Volume forecast file not loaded")
+    order = ["Value", "Deluxe", "Premium", "Super-premium"]
+    segs = df["Segment"].dropna().unique().tolist()
+    segs_sorted = [s for s in order if s in segs] + [s for s in segs if s not in order]
+    return {"segments": segs_sorted}
+
+
+@app.get("/volume-overview/data")
+def get_volume_overview_data(segment: str):
+    df = _store.get("volume_forecast_df")
+    if df is None:
+        raise HTTPException(404, "Volume forecast file not loaded")
+
+    seg_df = df[df["Segment"] == segment].copy()
+    seg_df["Date"] = pd.to_datetime(seg_df["Date"])
+    seg_df = seg_df.sort_values("Date")
+
+    # Detect forecast columns (all except Segment, Date, Actual)
+    model_cols = [c for c in seg_df.columns if c not in ["Segment", "Date", "Actual"]]
+
+    # Determine forecast start: first row where Actual is NaN
+    forecast_start_idx = seg_df["Actual"].isna().idxmax() if seg_df["Actual"].isna().any() else None
+    forecast_start_date = seg_df.loc[forecast_start_idx, "Date"].isoformat() if forecast_start_idx is not None else None
+
+    import math
+    records = []
+    for _, row in seg_df.iterrows():
+        r = {"Date": row["Date"].strftime("%Y-%m-%d")}
+        r["Actual"] = None if (row["Actual"] is None or (isinstance(row["Actual"], float) and math.isnan(row["Actual"]))) else round(float(row["Actual"]), 0)
+        for col in model_cols:
+            val = row[col]
+            r[col] = None if (val is None or (isinstance(val, float) and math.isnan(val))) else round(float(val), 0)
+        records.append(r)
+
+    return {
+        "data": records,
+        "model_cols": model_cols,
+        "forecast_start_date": forecast_start_date
+    }
+
+
+# ─────────────────────────────────────────────
+# Feature Overview endpoints
+# ─────────────────────────────────────────────
+
+@app.get("/feature-overview/variable")
+def get_feature_variable(variable: str):
+    df = _store.get("consolidated_df")
+    if df is None:
+        raise HTTPException(404, "Consolidated features not loaded")
+    if variable not in df.columns:
+        raise HTTPException(404, f"Variable '{variable}' not found")
+    import math
+    records = []
+    for _, row in df.iterrows():
+        val = row[variable]
+        records.append({
+            "date": pd.to_datetime(row["date"]).strftime("%Y-%m-%d"),
+            "value": None if (val is None or (isinstance(val, float) and math.isnan(val))) else float(val)
+        })
+    return {"data": records, "variable": variable}
+
+
+@app.get("/feature-overview/categories")
+def get_feature_categories():
+    df = _store.get("feature_list_df")
+    if df is None:
+        raise HTTPException(404, "Feature list not loaded")
+    result = {}
+    for _, row in df.iterrows():
+        cat = row["Category"]
+        if cat not in result:
+            result[cat] = []
+        result[cat].append({
+            "variable_name": row["Variable name"],
+            "display_name": row["Edited variable name"],
+            "description": row.get("Description", "")
+        })
+    return {"categories": result}

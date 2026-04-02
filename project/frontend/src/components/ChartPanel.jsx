@@ -153,6 +153,7 @@ export default function ChartPanel({ data, layout, style }) {
           {data.map((trace, i) => {
             const color = trace.line?.color || trace.marker?.color || COLORS[i % COLORS.length]
             const isDot = trace.line?.dash === 'dot'
+            const showDots = trace.mode !== 'lines'
             const yId = trace.yaxis === 'y2' ? 'y2' : 'y'
             return (
               <Line
@@ -164,7 +165,7 @@ export default function ChartPanel({ data, layout, style }) {
                 stroke={color}
                 strokeWidth={trace.line?.width || 2}
                 strokeDasharray={isDot ? '5 4' : undefined}
-                dot={{ r: 4, fill: color, strokeWidth: 0 }}
+                dot={showDots ? { r: 4, fill: color, strokeWidth: 0 } : false}
                 activeDot={{ r: 6 }}
                 connectNulls={false}
                 isAnimationActive={false}

@@ -2,7 +2,9 @@ import React, { useEffect, useState, useCallback } from 'react'
 import {
   getSegments, getPresenceTable, getGrowthTable,
   getHistoricalGrowth, getVariables,
-  calculateForecast, calculateWaterfall
+  calculateForecast, calculateWaterfall,
+  getVolumeOverviewSegments, getVolumeOverviewData,
+  getFeatureCategories, getFeatureVariable
 } from '../api/client'
 import DataTable from '../components/DataTable'
 import ChartPanel from '../components/ChartPanel'
@@ -11,12 +13,14 @@ import SliderControl from '../components/SliderControl'
 
 // ── Theme tokens ──────────────────────────────────────────────
 const C = {
-  bg: '#f4f6fb', card: '#ffffff', border: '#f0f2f8',
-  ochre: '#1a1a2e', ochreDim: '#718096', ochreFaint: 'rgba(79,70,229,0.08)',
-  text: '#2d3748', textDim: '#718096', black: '#ffffff'
+  bg: '#F5F5F5', card: '#ffffff', border: '#e8e8e8',
+  ochre: '#333333', ochreDim: '#666666', ochreFaint: 'rgba(255,189,89,0.12)',
+  text: '#333333', textDim: '#666666', black: '#333333'
 }
 
 const TABS = [
+  { id: 'volume',    label: '📦 Volume Overview' },
+  { id: 'features',  label: '🔬 Feature Overview' },
   { id: 'overview',  label: '🔍 Overview' },
   { id: 'growth',    label: '📈 Growth Rates' },
   { id: 'forecast',  label: '📊 Volume Forecast' },
@@ -26,22 +30,22 @@ const s = {
   page: { padding: '0', flex: 1, overflowY: 'auto', background: C.bg, display: 'flex', flexDirection: 'column' },
   header: {
     padding: '0 36px',
-    background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)',
-    borderBottom: '1px solid #0f3460',
-    boxShadow: '0 2px 12px rgba(0,0,0,0.15)'
+    background: '#333333',
+    borderBottom: '1px solid #FFBD59',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
   },
-  title: { fontSize: 26, fontWeight: 800, color: '#fff', letterSpacing: '-0.5px', paddingTop: 22 },
-  subtitle: { fontSize: 13, color: '#6b7db3', marginTop: 3, marginBottom: 0, paddingBottom: 16 },
+  title: { fontSize: 26, fontWeight: 800, color: '#FFBD59', letterSpacing: '-0.5px', paddingTop: 22 },
+  subtitle: { fontSize: 13, color: '#999999', marginTop: 3, marginBottom: 0, paddingBottom: 16 },
   tabBar: { display: 'flex', gap: 4, marginTop: 16 },
   tab: (active) => ({
     padding: '11px 28px', cursor: 'pointer', fontSize: 13, fontWeight: 700,
-    border: 'none', background: active ? '#fff' : 'transparent',
-    color: active ? '#1a1a2e' : '#8892b0',
-    borderTop: active ? '3px solid #4f46e5' : '3px solid transparent',
+    border: 'none', background: active ? '#ffffff' : 'transparent',
+    color: active ? '#FFBD59' : '#999999',
+    borderTop: active ? '3px solid #FFBD59' : '3px solid transparent',
     borderLeft: 'none', borderRight: 'none', borderBottom: 'none',
     borderRadius: '8px 8px 0 0',
     transition: 'all 0.15s', letterSpacing: '0.02em',
-    boxShadow: active ? '0 -2px 8px rgba(79,70,229,0.15)' : 'none'
+    boxShadow: active ? '0 -2px 8px rgba(255,189,89,0.15)' : 'none'
   }),
   tabContent: { flex: 1, padding: '28px 36px', overflowY: 'auto' },
   section: { marginBottom: 24 },
@@ -49,14 +53,14 @@ const s = {
     fontSize: 13, fontWeight: 700, marginBottom: 10, color: C.ochre,
     textTransform: 'uppercase', letterSpacing: '0.06em'
   },
-  card: { background: C.card, borderRadius: 12, padding: 20, border: `1px solid ${C.border}`, boxShadow: '0 2px 8px rgba(0,0,0,0.3)' },
-  select: { padding: '8px 14px', borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 14, minWidth: 220, background: '#fff', cursor: 'pointer', color: '#1a1a2e' },
-  btn: { padding: '10px 24px', background: 'linear-gradient(135deg, #4f46e5, #7c3aed)', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 14, fontWeight: 700, boxShadow: '0 2px 8px rgba(79,70,229,0.35)' },
-  badge: { display: 'inline-block', padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700, background: '#eef2ff', color: '#4f46e5', border: '1px solid #4f46e5' },
-  segmentBar: { display: 'flex', alignItems: 'center', gap: 14, padding: '14px 20px', background: '#fff', borderRadius: 12, border: '1px solid #f0f2f8', marginBottom: 24 },
-  textarea: { width: '100%', minHeight: 80, padding: 10, borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 13, resize: 'vertical', background: '#fafbff', color: '#2d3748' },
-  editInput: { width: '100%', padding: '5px 8px', border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 12, background: '#fafbff', color: '#2d3748' },
-  multiselect: { width: '100%', height: 130, padding: 6, border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 13, background: '#fafbff', color: '#2d3748' },
+  card: { background: '#ffffff', borderRadius: 12, padding: 20, border: '1px solid #e8e8e8', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' },
+  select: { padding: '8px 14px', borderRadius: 8, border: '1px solid #e8e8e8', fontSize: 14, minWidth: 220, background: '#ffffff', cursor: 'pointer', color: '#333333' },
+  btn: { padding: '10px 24px', background: '#FFBD59', color: '#333333', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 14, fontWeight: 700, boxShadow: '0 2px 8px rgba(255,189,89,0.4)' },
+  badge: { display: 'inline-block', padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700, background: '#FFF8EC', color: '#FFBD59', border: '1px solid #FFBD59' },
+  segmentBar: { display: 'flex', alignItems: 'center', gap: 14, padding: '14px 20px', background: '#ffffff', borderRadius: 12, border: '1px solid #e8e8e8', marginBottom: 24 },
+  textarea: { width: '100%', minHeight: 80, padding: 10, borderRadius: 8, border: '1px solid #e8e8e8', fontSize: 13, resize: 'vertical', background: '#F5F5F5', color: '#333333' },
+  editInput: { width: '100%', padding: '5px 8px', border: '1px solid #e8e8e8', borderRadius: 6, fontSize: 12, background: '#F5F5F5', color: '#333333' },
+  multiselect: { width: '100%', height: 130, padding: 6, border: '1px solid #e8e8e8', borderRadius: 8, fontSize: 13, background: '#F5F5F5', color: '#333333' },
   row: { display: 'flex', gap: 16, flexWrap: 'wrap' },
   col: { flex: 1, minWidth: 280 },
   placeholder: { textAlign: 'center', padding: '48px 20px', color: C.ochreDim, fontSize: 14 }
@@ -73,16 +77,29 @@ const SCENARIO_LABELS = {
 const labelScenario = (s) => SCENARIO_LABELS[s] || s
 
 function presenceCellStyle(col, val) {
-  if (col === 'Variable') return { fontWeight: 600, color: C.ochre }
-  if (val === '✓') return { color: '#16a34a', fontWeight: 700, fontSize: 15, background: 'rgba(22,163,74,0.12)', textAlign: 'center' }
-  if (val === '✗') return { color: '#dc2626', fontWeight: 700, fontSize: 15, background: 'rgba(220,38,38,0.1)', textAlign: 'center' }
+  if (col === 'Variable') return { fontWeight: 600, color: '#333333' }
+  if (val === '✓') return { color: '#41C185', fontWeight: 700, fontSize: 15, background: 'rgba(65,193,133,0.1)', textAlign: 'center' }
+  if (val === '✗') return { color: '#e53e3e', fontWeight: 700, fontSize: 15, background: 'rgba(229,62,62,0.08)', textAlign: 'center' }
   return {}
 }
 
 export default function Dashboard() {
-  const [activeTab, setActiveTab] = useState('overview')
+  const [activeTab, setActiveTab] = useState('volume')
   const [segments, setSegments] = useState([])
   const [selectedSegment, setSelectedSegment] = useState('')
+  // Volume Overview state
+  const [voSegments, setVoSegments] = useState([])
+  const [voSelectedSegment, setVoSelectedSegment] = useState('')
+  const [voData, setVoData] = useState(null)
+  const [voShowForecast, setVoShowForecast] = useState(false)
+  const [voLoading, setVoLoading] = useState(false)
+  // Feature Overview state
+  const [featureCategories, setFeatureCategories] = useState({})
+  const [featureOpenCat, setFeatureOpenCat] = useState(null)
+  const [foSegment, setFoSegment] = useState('')
+  const [foVolumeData, setFoVolumeData] = useState(null)
+  const [foSelectedVar, setFoSelectedVar] = useState(null)   // { variable_name, display_name }
+  const [foVarData, setFoVarData] = useState(null)
   const [presenceTable, setPresenceTable] = useState([])
   const [growthData, setGrowthData] = useState([])
   const [editedGrowthData, setEditedGrowthData] = useState([])
@@ -106,6 +123,8 @@ export default function Dashboard() {
   useEffect(() => {
     getPresenceTable().then(r => setPresenceTable(r.data.table)).catch(() => {})
     getSegments().then(r => setSegments(r.data.segments)).catch(() => {})
+    getVolumeOverviewSegments().then(r => setVoSegments(r.data.segments)).catch(() => {})
+    getFeatureCategories().then(r => setFeatureCategories(r.data.categories)).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -158,18 +177,18 @@ export default function Dashboard() {
     } catch (e) { alert('Waterfall failed: ' + (e.response?.data?.detail || e.message)) }
   }
 
-  // Auto-regenerate waterfall when config changes — only after first manual generation
+  // Auto-regenerate waterfall when config changes or forecast first runs
   useEffect(() => {
-    if (!hasGeneratedWaterfall.current || !forecastResult || selectedVars.length === 0) return
+    if (!forecastResult || selectedVars.length === 0 || !wfStartFy || !wfEndFy) return
     const timer = setTimeout(() => {
       calculateWaterfall({
         segment: selectedSegment, start_fy: wfStartFy, end_fy: wfEndFy,
         selected_vars: selectedVars, variable_scale: variableScale,
         growth_data: editedGrowthData, final_df: forecastResult.final_df
       }).then(r => setWaterfallResult(r.data.waterfall)).catch(() => {})
-    }, 300) // debounce 300ms so rapid chip clicks don't spam the API
+    }, 300)
     return () => clearTimeout(timer)
-  }, [selectedVars, wfStartFy, wfEndFy, variableScale])
+  }, [selectedVars, wfStartFy, wfEndFy, variableScale, forecastResult])
 
   const growthChartData = useCallback(() => {
     if (selectedGrowthRow === null || !editedGrowthData[selectedGrowthRow]) return null
@@ -338,6 +357,264 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* ── TAB 0: Volume Overview ── */}
+      {activeTab === 'volume' && (
+        <div style={s.tabContent}>
+          {/* Segment selector */}
+          <div style={s.segmentBar}>
+            <span style={{ fontWeight: 600, fontSize: 14, color: '#333333' }}>Segment:</span>
+            <select style={s.select} value={voSelectedSegment} onChange={async e => {
+              const seg = e.target.value
+              setVoSelectedSegment(seg)
+              setVoData(null)
+              setVoShowForecast(false)
+              if (!seg) return
+              setVoLoading(true)
+              try {
+                const r = await getVolumeOverviewData(seg)
+                setVoData(r.data)
+              } catch (err) { alert('Failed to load: ' + err.message) }
+              setVoLoading(false)
+            }}>
+              <option value="">— Select a segment —</option>
+              {voSegments.map(seg => <option key={seg} value={seg}>{seg}</option>)}
+            </select>
+            {voSelectedSegment && <span style={s.badge}>{voSelectedSegment}</span>}
+            {voLoading && <span style={{ fontSize: 13, color: '#666666' }}>Loading...</span>}
+          </div>
+
+          {voData && (() => {
+            const MODEL_COLORS = {
+              'SMA': '#FFBD59', 'Holt-Winters': '#41C185', 'ETS': '#458EE2',
+              'SARIMA': '#e53e3e', 'Prophet': '#8b5cf6'
+            }
+            const forecastStart = voData.forecast_start_date
+
+            // Actual-only traces (solid historical, dotted if actual exists in forecast period)
+            const actualTraces = []
+            const actualHist = voData.data.filter(r => r.Actual != null && (!forecastStart || r.Date < forecastStart))
+            const actualFc = voData.data.filter(r => r.Actual != null && forecastStart && r.Date >= forecastStart)
+            if (actualHist.length > 0)
+              actualTraces.push({ x: actualHist.map(r => r.Date), y: actualHist.map(r => r.Actual), mode: 'lines', name: 'Actual', type: 'scatter', line: { color: '#333333', width: 2.5, dash: 'solid' } })
+            if (actualFc.length > 0)
+              actualTraces.push({ x: actualFc.map(r => r.Date), y: actualFc.map(r => r.Actual), mode: 'lines', name: 'Actual (Forecast Period)', type: 'scatter', line: { color: '#333333', width: 2.5, dash: 'dot' } })
+
+            // Forecast chart traces: actual solid + model dotted
+            const forecastTraces = [...actualTraces]
+            voData.model_cols.forEach(col => {
+              const fcRows = voData.data.filter(r => r[col] != null && forecastStart && r.Date >= forecastStart)
+              const bridgeRow = voData.data.filter(r => r.Actual != null && r.Date < forecastStart).slice(-1)[0]
+              const rows = bridgeRow ? [{ ...bridgeRow, [col]: bridgeRow.Actual }, ...fcRows] : fcRows
+              if (rows.length > 0)
+                forecastTraces.push({ x: rows.map(r => r.Date), y: rows.map(r => r[col]), mode: 'lines+markers', name: col, type: 'scatter', line: { color: MODEL_COLORS[col] || '#999', width: 2, dash: 'dot' }, marker: { size: 4 } })
+            })
+
+            return (
+              <>
+                {/* Chart 1: Actual only */}
+                <div style={s.section}>
+                  <div style={s.sectionTitle}>📈 Actual Volume — {voSelectedSegment}</div>
+                  <div style={s.card}>
+                    <ChartPanel data={actualTraces} layout={{
+                      title: '', xaxis: { title: { text: 'Date' } }, yaxis: { title: { text: 'Volume' } },
+                      legend: { orientation: 'h', y: -0.25 }, height: 380
+                    }} />
+                  </div>
+                </div>
+
+                {/* Show Forecast button — below actual chart */}
+                {!voShowForecast && (
+                  <div style={{ ...s.section, display: 'flex', alignItems: 'center', gap: 16 }}>
+                    <button style={s.btn} onClick={() => setVoShowForecast(true)}>📊 Show Forecast</button>
+                  </div>
+                )}
+
+                {/* Chart 2: Actual + all model forecasts */}
+                {voShowForecast && (
+                  <div style={s.section}>
+                    <div style={s.sectionTitle}>📊 Volume Forecast — {voSelectedSegment}</div>
+                    <div style={s.card}>
+                      <ChartPanel data={forecastTraces} layout={{
+                        title: '', xaxis: { title: { text: 'Date' } }, yaxis: { title: { text: 'Volume' } },
+                        legend: { orientation: 'h', y: -0.25 }, height: 420
+                      }} />
+                    </div>
+                  </div>
+                )}
+
+                <div style={s.section}>
+                  <ExpanderSection title="📋 Data Overview" defaultOpen={false}>
+                    <DataTable
+                      maxHeight="400px"
+                      data={voData.data.map(r => {
+                        const row = { Date: r.Date, Actual: r.Actual != null ? parseFloat(r.Actual).toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '-' }
+                        voData.model_cols.forEach(col => { row[col] = r[col] != null ? parseFloat(r[col]).toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '-' })
+                        return row
+                      })}
+                    />
+                  </ExpanderSection>
+                </div>
+              </>
+            )
+          })()}
+        </div>
+      )}
+
+      {/* ── TAB: Feature Overview ── */}
+      {activeTab === 'features' && (
+        <div style={s.tabContent}>
+          {/* Segment selector */}
+          <div style={s.segmentBar}>
+            <span style={{ fontWeight: 600, fontSize: 14, color: '#333333' }}>Segment:</span>
+            <select style={s.select} value={foSegment} onChange={async e => {
+              const seg = e.target.value
+              setFoSegment(seg)
+              setFoVolumeData(null)
+              setFoSelectedVar(null)
+              setFoVarData(null)
+              if (!seg) return
+              try {
+                const r = await getVolumeOverviewData(seg)
+                setFoVolumeData(r.data)
+              } catch (err) { console.error(err) }
+            }}>
+              <option value="">— Select a segment —</option>
+              {voSegments.map(seg => <option key={seg} value={seg}>{seg}</option>)}
+            </select>
+            {foSegment && <span style={s.badge}>{foSegment}</span>}
+          </div>
+
+          <div style={{ display: 'flex', gap: 16, minHeight: '70vh' }}>
+            {/* Left — actual volume chart */}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {foVolumeData ? (() => {
+                const actualRows = foVolumeData.data.filter(r => r.Actual != null)
+
+                // Compute correlation if variable selected — match by year-month
+                let correlation = null
+                if (foVarData && foVarData.length > 0) {
+                  const varMap = Object.fromEntries(
+                    foVarData.map(r => [r.date.substring(0, 7), r.value])
+                  )
+                  const pairs = actualRows
+                    .map(r => ({ vol: r.Actual, feat: varMap[r.Date.substring(0, 7)] }))
+                    .filter(p => p.vol != null && p.feat != null)
+                  if (pairs.length > 1) {
+                    const n = pairs.length
+                    const meanV = pairs.reduce((s, p) => s + p.vol, 0) / n
+                    const meanF = pairs.reduce((s, p) => s + p.feat, 0) / n
+                    const num = pairs.reduce((s, p) => s + (p.vol - meanV) * (p.feat - meanF), 0)
+                    const denV = Math.sqrt(pairs.reduce((s, p) => s + (p.vol - meanV) ** 2, 0))
+                    const denF = Math.sqrt(pairs.reduce((s, p) => s + (p.feat - meanF) ** 2, 0))
+                    correlation = denV * denF !== 0 ? (num / (denV * denF)).toFixed(3) : null
+                  }
+                }
+
+                const traces = [{
+                  x: actualRows.map(r => r.Date),
+                  y: actualRows.map(r => r.Actual),
+                  mode: 'lines', name: 'Actual Volume', type: 'scatter',
+                  line: { color: '#333333', width: 2.5, dash: 'solid' }
+                }]
+                if (foVarData) {
+                  // Align feature dates to volume dates by year-month so x-axis matches
+                  const varMap = Object.fromEntries(
+                    foVarData.map(r => [r.date.substring(0, 7), r.value])
+                  )
+                  const alignedY = actualRows.map(r => varMap[r.Date.substring(0, 7)] ?? null)
+                  traces.push({
+                    x: actualRows.map(r => r.Date),
+                    y: alignedY,
+                    mode: 'lines', name: foSelectedVar.display_name, type: 'scatter',
+                    yaxis: 'y2',
+                    line: { color: '#FFBD59', width: 2.5, dash: 'solid' },
+                    marker: { color: '#FFBD59' }
+                  })
+                }
+                return (
+                  <div style={s.card}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#333333', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        📈 {foSelectedVar ? `${foSegment} Volume vs ${foSelectedVar.display_name}` : `Actual Volume — ${foSegment}`}
+                      </div>
+                      {correlation !== null && (
+                        <div style={{ background: '#FFF8EC', border: '1px solid #FFBD59', borderRadius: 8, padding: '6px 14px', textAlign: 'center', flexShrink: 0 }}>
+                          <div style={{ fontSize: 11, color: '#666666', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Correlation</div>
+                          <div style={{ fontSize: 20, fontWeight: 800, color: parseFloat(correlation) >= 0 ? '#41C185' : '#e53e3e' }}>{correlation}</div>
+                        </div>
+                      )}
+                    </div>
+                    <ChartPanel data={traces} layout={{
+                      title: '', xaxis: { title: { text: 'Date' } },
+                      yaxis: { title: { text: 'Volume' } },
+                      yaxis2: foVarData ? { title: { text: foSelectedVar.display_name }, overlaying: 'y', side: 'right' } : undefined,
+                      legend: { orientation: 'h', y: -0.25 },
+                      height: 420
+                    }} />
+                    {foSelectedVar && (
+                      <div style={{ marginTop: 8, fontSize: 12, color: '#666666' }}>
+                        Click another variable to compare, or click the same to deselect.
+                      </div>
+                    )}
+                  </div>
+                )
+              })() : (
+                <div style={{ ...s.card, ...s.placeholder }}>
+                  {foSegment ? 'Loading...' : '☝ Select a segment to view volume'}
+                </div>
+              )}
+            </div>
+
+            {/* Right panel — category accordion */}
+            <div style={{ width: 280, flexShrink: 0, background: '#ffffff', border: '1px solid #e8e8e8', borderRadius: 12, padding: '16px 12px', overflowY: 'auto', maxHeight: '75vh' }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#333333', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 14 }}>Categories</div>
+              {Object.entries(featureCategories).map(([cat, vars]) => (
+                <div key={cat} style={{ marginBottom: 6, border: '1px solid #e8e8e8', borderRadius: 8, overflow: 'hidden' }}>
+                  <div
+                    onClick={() => setFeatureOpenCat(featureOpenCat === cat ? null : cat)}
+                    style={{
+                      padding: '9px 12px', cursor: 'pointer', fontWeight: 700, fontSize: 12,
+                      background: featureOpenCat === cat ? '#FFBD59' : '#F5F5F5',
+                      color: '#333333', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      userSelect: 'none'
+                    }}
+                  >
+                    <span>{cat}</span>
+                    <span style={{ fontSize: 10 }}>{featureOpenCat === cat ? '▲' : '▼'}</span>
+                  </div>
+                  {featureOpenCat === cat && (
+                    <div style={{ background: '#ffffff' }}>
+                      {vars.map(v => (
+                        <div key={v.variable_name}
+                          onClick={async () => {
+                            if (foSelectedVar?.variable_name === v.variable_name) {
+                              setFoSelectedVar(null); setFoVarData(null); return
+                            }
+                            setFoSelectedVar(v)
+                            try {
+                              const r = await getFeatureVariable(v.variable_name)
+                              setFoVarData(r.data.data)
+                            } catch (e) { console.error(e) }
+                          }}
+                          style={{
+                            padding: '8px 12px', fontSize: 12,
+                            color: foSelectedVar?.variable_name === v.variable_name ? '#FFBD59' : '#333333',
+                            background: foSelectedVar?.variable_name === v.variable_name ? '#FFF8EC' : '#ffffff',
+                            borderBottom: '1px solid #f0f0f0', cursor: 'pointer',
+                            fontWeight: foSelectedVar?.variable_name === v.variable_name ? 700 : 400
+                          }}>
+                          {v.display_name}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── TAB 1: Overview ── */}
       {activeTab === 'overview' && (
         <div style={s.tabContent}>
@@ -400,19 +677,6 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div style={s.section}>
-              <ExpanderSection title="📊 Historical Volume Growth" defaultOpen={false}>
-                {historicalError
-                  ? <p style={{ color: '#dc2626', fontSize: 13 }}>⚠ {historicalError}</p>
-                  : <DataTable maxHeight="280px" data={historicalGrowth.map(r => ({
-                      Segment: r.Segment, FiscalYear: toFY(r.FiscalYear),
-                      PredictedVolume: r.PredictedVolume != null ? parseFloat(r.PredictedVolume).toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '-',
-                      'VolumeGrowth_%': r['VolumeGrowth_%'] != null ? parseFloat(r['VolumeGrowth_%']).toFixed(1) + '%' : '-',
-                      Scenario: r.Scenario
-                    }))} />
-                }
-              </ExpanderSection>
-            </div>
           </>)}
         </div>
       )}
@@ -435,7 +699,7 @@ export default function Dashboard() {
               {/* ── Scenario Sub-tabs ── */}
               {(() => {
                 const scenarios = ['Base Elasticity', '+10% Elasticity', '-10% Elasticity']
-                const scColors = { 'Base Elasticity': '#4f46e5', '+10% Elasticity': '#10b981', '-10% Elasticity': '#ef4444' }
+                const scColors = { 'Base Elasticity': '#FFBD59', '+10% Elasticity': '#41C185', '-10% Elasticity': '#458EE2' }
                 return (
                   <div style={{ display: 'flex', gap: 8, marginBottom: 20, borderBottom: '2px solid #e2e8f0', paddingBottom: 0 }}>
                     {scenarios.map(sc => {
@@ -456,30 +720,41 @@ export default function Dashboard() {
 
               {/* ── KPI Cards ── */}
               {(() => {
-                const baseRows = forecastResult.final_df?.filter(r => r.Scenario === scenarioTab && r.FiscalYear !== 'A26') || []
-                const cagrRow = forecastResult.cagr?.table?.find(r => r.Scenario === scenarioTab)
-                const cagrKey = cagrRow ? Object.keys(cagrRow).find(k => k.includes('CAGR')) : null
+                // Use forecast_scenarios (Forecast Comparison table) as source
+                const scenarioRows = forecastResult.forecast_scenarios
+                  ?.filter(r => r.Scenario === scenarioTab && r.FiscalYear !== 'A26') || []
+
+                // Recalculate 3-yr CAGR from growth rates in forecast_scenarios
+                // CAGR = (∏(1 + g_i))^(1/n) - 1
+                const growthValues = scenarioRows
+                  .map(r => parseFloat(r['VolumeGrowth_%']))
+                  .filter(v => !isNaN(v))
+                const n = growthValues.length
+                const cagr = n > 0
+                  ? (growthValues.reduce((prod, g) => prod * (1 + g / 100), 1) ** (1 / n) - 1) * 100
+                  : null
+
                 const kpis = [
-                  ...baseRows.map(r => ({
+                  ...scenarioRows.map(r => ({
                     label: toFY(r.FiscalYear),
                     value: r['VolumeGrowth_%'] != null ? `${parseFloat(r['VolumeGrowth_%']).toFixed(1)}%` : '-',
                     sub: r.PredictedVolume != null ? parseFloat(r.PredictedVolume).toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '-'
                   })),
-                  ...(cagrRow && cagrKey ? [{ label: cagrKey, value: `${parseFloat(cagrRow[cagrKey]).toFixed(1)}%`, sub: labelScenario(scenarioTab), isCAGR: true }] : [])
+                  ...(cagr !== null ? [{ label: `${n}-YR CAGR`, value: `${cagr.toFixed(1)}%`, sub: labelScenario(scenarioTab), isCAGR: true }] : [])
                 ]
                 if (!kpis.length) return null
                 return (
                   <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 24 }}>
                     {kpis.map((k, i) => (
                       <div key={i} style={{
-                        flex: '1 1 120px', background: k.isCAGR ? '#1a1a2e' : '#fff',
+                        flex: '1 1 120px', background: k.isCAGR ? '#333333' : '#ffffff',
                         borderRadius: 12, padding: '16px 20px',
-                        border: k.isCAGR ? '2px solid #4f46e5' : '1px solid #e2e8f0',
-                        boxShadow: '0 2px 8px rgba(0,0,0,0.06)', textAlign: 'center'
+                        border: k.isCAGR ? `2px solid #FFBD59` : '1px solid #e8e8e8',
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.05)', textAlign: 'center'
                       }}>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: k.isCAGR ? '#818cf8' : '#718096', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>{k.label}</div>
-                        <div style={{ fontSize: 26, fontWeight: 800, color: k.isCAGR ? '#fff' : (parseFloat(k.value) >= 0 ? '#10b981' : '#ef4444'), lineHeight: 1 }}>{k.value}</div>
-                        <div style={{ fontSize: 13, color: k.isCAGR ? '#818cf8' : '#a0aec0', marginTop: 5 }}>{k.sub}</div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: k.isCAGR ? '#FFBD59' : '#666666', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>{k.label}</div>
+                        <div style={{ fontSize: 26, fontWeight: 800, color: k.isCAGR ? '#FFBD59' : (parseFloat(k.value) >= 0 ? '#41C185' : '#458EE2'), lineHeight: 1 }}>{k.value}</div>
+                        <div style={{ fontSize: 13, color: '#999999', marginTop: 5 }}>{k.sub}</div>
                       </div>
                     ))}
                   </div>
@@ -505,26 +780,27 @@ export default function Dashboard() {
                 </div>
               </div>
 
+              {/* Volume table: same data as line chart */}
               <div style={s.section}>
-                <ExpanderSection title="⚡ Forecast Comparison (Elasticity Scenarios)" defaultOpen={false}>
-                  <DataTable maxHeight="300px" data={forecastResult.forecast_scenarios.map(r => ({
-                    ...r,
-                    Scenario: labelScenario(r.Scenario),
-                    FiscalYear: toFY(r.FiscalYear),
-                    PredictedVolume: parseFloat(r.PredictedVolume).toLocaleString('en-IN', { maximumFractionDigits: 0 }),
-                    'VolumeGrowth_%': parseFloat(r['VolumeGrowth_%']).toFixed(1) + '%'
-                  }))} />
-                </ExpanderSection>
-              </div>
-
-              <div style={s.section}>
-                <ExpanderSection title="📈 Forecasted Volumes & Growth Rates" defaultOpen={false}>
-                  <DataTable data={forecastResult.final_df.map(r => ({ ...r, Scenario: labelScenario(r.Scenario), FiscalYear: toFY(r.FiscalYear) }))} maxHeight="300px" />
+                <ExpanderSection title="📋 Annual Volume — Historical & Forecast" defaultOpen={false}>
+                  <DataTable
+                    maxHeight="320px"
+                    data={(forecastResult.plot_data || [])
+                      .filter(r => r.Scenario === scenarioTab || r.Scenario === 'Historical')
+                      .sort((a, b) => parseInt(a.FiscalYear.replace(/\D/g, '')) - parseInt(b.FiscalYear.replace(/\D/g, '')))
+                      .map(r => ({
+                        'Fiscal Year': toFY(r.FiscalYear),
+                        'Segment': r.Segment,
+                        'Volume': r.PredictedVolume != null ? parseFloat(r.PredictedVolume).toLocaleString('en-IN', { maximumFractionDigits: 0 }) : '-',
+                        'Growth Rate (%)': r['VolumeGrowth_%'] != null ? `${parseFloat(r['VolumeGrowth_%']).toFixed(1)}%` : '-',
+                        'Scenario': r.Scenario === 'Historical' ? 'Historical' : labelScenario(r.Scenario)
+                      }))}
+                  />
                 </ExpanderSection>
               </div>
 
               {/* ── Waterfall ── */}
-              <ExpanderSection title="🌊 Waterfall Configuration" defaultOpen={false}>
+              <ExpanderSection title="🌊 Waterfall Configuration" defaultOpen>
                 <div style={s.row}>
                   <div style={s.col}>
                     <label style={{ fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 4, color: C.ochre }}>Start Fiscal Year</label>
@@ -568,9 +844,8 @@ export default function Dashboard() {
                     </div>
                   </div>
                 </div>
-                <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ marginTop: 16 }}>
                   <span style={{ fontSize: 13, color: C.ochreDim }}>{toFY(wfStartFy)} → {toFY(wfEndFy)}</span>
-                  <button style={s.btn} onClick={handleRunWaterfall}>Generate Waterfall</button>
                 </div>
               </ExpanderSection>
 

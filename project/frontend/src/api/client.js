@@ -19,4 +19,9 @@ export const getVariables     = (segment) => api.get('/data/variables', { params
 export const calculateForecast  = (payload) => api.post('/calculate/forecast', payload)
 export const calculateWaterfall = (payload) => api.post('/calculate/waterfall', payload)
 
+export const getVolumeOverviewSegments = () => api.get('/volume-overview/segments')
+export const getVolumeOverviewData = (segment) => api.get('/volume-overview/data', { params: { segment } })
+export const getFeatureCategories = () => api.get('/feature-overview/categories')
+export const getFeatureVariable = (variable) => api.get('/feature-overview/variable', { params: { variable } })
+
 export default api
