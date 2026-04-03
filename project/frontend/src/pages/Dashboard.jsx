@@ -4,8 +4,9 @@ import {
   getHistoricalGrowth, getVariables,
   calculateForecast, calculateWaterfall,
   getVolumeOverviewSegments, getVolumeOverviewData,
-  getFeatureCategories, getFeatureVariable
+  getFeatureCategories, getFeatureVariable, getFeatureCorrelations, getCorrelationMatrix
 } from '../api/client'
+import { displayVar } from '../api/variableLabels'
 import DataTable from '../components/DataTable'
 import ChartPanel from '../components/ChartPanel'
 import ExpanderSection from '../components/ExpanderSection'
@@ -66,7 +67,7 @@ const s = {
   placeholder: { textAlign: 'center', padding: '48px 20px', color: C.ochreDim, fontSize: 14 }
 }
 
-const cleanVarName = (v) => v.replace(/^(Res_|Lag_|lag_)/g, '').trim()
+const cleanVarName = (v) => v ? v.replace(/^(Res_|Lag_|lag_)/g, '').trim() : ''
 const toFY = (s) => typeof s === 'string' ? s.replace(/\bA(\d+)\b/g, 'FY$1') : s
 
 const SCENARIO_LABELS = {
@@ -100,6 +101,12 @@ export default function Dashboard() {
   const [foVolumeData, setFoVolumeData] = useState(null)
   const [foSelectedVar, setFoSelectedVar] = useState(null)   // { variable_name, display_name }
   const [foVarData, setFoVarData] = useState(null)
+  const [foCorrelations, setFoCorrelations] = useState([])
+  const [foSelectedCorrVars, setFoSelectedCorrVars] = useState([])
+  const [foMatrix, setFoMatrix] = useState(null)
+  const [foMatrixVars, setFoMatrixVars] = useState([])
+  const [foClickedCell, setFoClickedCell] = useState(null)   // { rowLabel, colLabel, rowIdx, colIdx }
+  const [foClickedData, setFoClickedData] = useState({})     // { varName: [{date, value}] }
   const [presenceTable, setPresenceTable] = useState([])
   const [growthData, setGrowthData] = useState([])
   const [editedGrowthData, setEditedGrowthData] = useState([])
@@ -472,10 +479,27 @@ export default function Dashboard() {
               setFoVolumeData(null)
               setFoSelectedVar(null)
               setFoVarData(null)
+              setFoCorrelations([])
+              setFoSelectedCorrVars([])
+              setFoMatrix(null)
+              setFoMatrixVars([])
+              setFoClickedCell(null)
+              setFoClickedData({})
               if (!seg) return
               try {
                 const r = await getVolumeOverviewData(seg)
                 setFoVolumeData(r.data)
+              } catch (err) { console.error(err) }
+              try {
+                const r2 = await getFeatureCorrelations(seg)
+                const allVars = r2.data.correlations.map(c => c.variable)
+                setFoCorrelations(r2.data.correlations)
+                setFoSelectedCorrVars(allVars)
+              } catch (err) { console.error(err) }
+              try {
+                const r3 = await getCorrelationMatrix(seg)
+                setFoMatrix(r3.data)
+                setFoMatrixVars(r3.data.columns)
               } catch (err) { console.error(err) }
             }}>
               <option value="">— Select a segment —</option>
@@ -597,12 +621,30 @@ export default function Dashboard() {
                             } catch (e) { console.error(e) }
                           }}
                           style={{
-                            padding: '8px 12px', fontSize: 12,
+                            padding: '8px 12px', fontSize: 12, position: 'relative',
                             color: foSelectedVar?.variable_name === v.variable_name ? '#FFBD59' : '#333333',
                             background: foSelectedVar?.variable_name === v.variable_name ? '#FFF8EC' : '#ffffff',
                             borderBottom: '1px solid #f0f0f0', cursor: 'pointer',
                             fontWeight: foSelectedVar?.variable_name === v.variable_name ? 700 : 400
-                          }}>
+                          }}
+                          onMouseEnter={e => {
+                            if (!v.description) return
+                            const tip = document.createElement('div')
+                            tip.id = `tip-${v.variable_name}`
+                            tip.style.cssText = `position:fixed;z-index:9999;background:#1a1a2e;color:#fff;padding:10px 14px;border-radius:8px;font-size:12px;max-width:280px;line-height:1.6;pointer-events:none;box-shadow:0 6px 20px rgba(0,0,0,0.25);border-left:3px solid #FFBD59`
+                            tip.textContent = v.description
+                            document.body.appendChild(tip)
+                            const rect = e.currentTarget.getBoundingClientRect()
+                            const tipW = 280
+                            const left = rect.left - tipW - 12
+                            tip.style.left = `${Math.max(8, left)}px`
+                            tip.style.top = `${Math.min(rect.top, window.innerHeight - 120)}px`
+                          }}
+                          onMouseLeave={() => {
+                            const tip = document.getElementById(`tip-${v.variable_name}`)
+                            if (tip) tip.remove()
+                          }}
+                        >
                           {v.display_name}
                         </div>
                       ))}
@@ -612,6 +654,132 @@ export default function Dashboard() {
               ))}
             </div>
           </div>
+
+          {/* ── Correlation Matrix Heatmap ── */}
+          {foMatrix && (
+            <div style={{ marginTop: 28 }}>
+              <div style={s.sectionTitle}>🔥 Correlation Matrix</div>
+
+              {/* Variable selector for matrix */}
+              <div style={{ ...s.card, marginBottom: 16 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#333333', marginBottom: 10 }}>Select variables for matrix:</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginBottom: 8 }}>
+                  {foMatrix.columns.map((col, idx) => {
+                    const active = foMatrixVars.includes(col)
+                    return (
+                      <span key={col}
+                        onClick={() => setFoMatrixVars(prev => active ? prev.filter(v => v !== col) : [...prev, col])}
+                        style={{
+                          padding: '4px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600,
+                          cursor: 'pointer', userSelect: 'none',
+                          background: active ? '#41C185' : '#F5F5F5',
+                          color: active ? '#ffffff' : '#666666',
+                          border: active ? '1px solid #41C185' : '1px solid #e8e8e8'
+                        }}>
+                        {foMatrix.display_columns[idx]}
+                      </span>
+                    )
+                  })}
+                </div>
+                <div style={{ display: 'flex', gap: 12 }}>
+                  <span onClick={() => setFoMatrixVars(foMatrix.columns)} style={{ fontSize: 11, color: '#41C185', cursor: 'pointer', textDecoration: 'underline' }}>Select all</span>
+                  <span onClick={() => setFoMatrixVars([])} style={{ fontSize: 11, color: '#666666', cursor: 'pointer', textDecoration: 'underline' }}>Clear all</span>
+                </div>
+              </div>
+
+              {/* Heatmap */}
+              {(() => {
+                const selIdx = foMatrix.columns.map((c, i) => foMatrixVars.includes(c) ? i : -1).filter(i => i >= 0)
+                if (selIdx.length === 0) return <p style={{ color: '#999', fontSize: 13, padding: '12px 0' }}>Select variables above to view the correlation matrix.</p>
+                if (selIdx.length < 2) return <p style={{ color: '#999', fontSize: 13, padding: '12px 0' }}>Select at least 2 variables to display the matrix.</p>
+                const labels = selIdx.map(i => foMatrix.display_columns[i])
+                const z = selIdx.map(ri => selIdx.map(ci => foMatrix.matrix[ri][ci]))
+                const size = Math.max(400, selIdx.length * 36 + 100)
+                return (
+                  <div style={s.card}>
+                    <ChartPanel
+                      data={[{ type: 'heatmap', z, x: labels, y: labels, colorscale: 'RdYlGn', zmin: -1, zmax: 1, text: z.map(row => row.map(v => v != null ? v.toFixed(2) : '')), texttemplate: '%{text}', showscale: true }]}
+                      layout={{ title: '', height: size, margin: { l: 180, r: 60, t: 20, b: 180 }, xaxis: { tickangle: -45 }, yaxis: { automargin: true } }}
+                      onCellClick={async ({ rowLabel, colLabel, rowIdx, colIdx }) => {
+                        const rowVar = foMatrix.columns[selIdx[rowIdx]]
+                        const colVar = foMatrix.columns[selIdx[colIdx]]
+                        setFoClickedCell({ rowLabel, colLabel, rowVar, colVar })
+
+                        // Build fresh data map — don't rely on stale foClickedData closure
+                        setFoClickedData(prev => {
+                          const newData = { ...prev }
+                          const toFetch = [rowVar, colVar].filter(v => v !== 'Volume' && !newData[v])
+                          // Fetch missing variables asynchronously then update state
+                          Promise.all(toFetch.map(async v => {
+                            try {
+                              const r = await getFeatureVariable(v)
+                              return [v, r.data.data]
+                            } catch (e) { return [v, null] }
+                          })).then(results => {
+                            setFoClickedData(latest => {
+                              const updated = { ...latest }
+                              results.forEach(([v, d]) => { if (d) updated[v] = d })
+                              return updated
+                            })
+                          })
+                          return newData
+                        })
+                      }}
+                    />
+                  </div>
+                )
+              })()}
+
+              {/* ── Cell click line plot ── */}
+              {foClickedCell && (() => {
+                const { rowLabel, colLabel, rowVar, colVar } = foClickedCell
+
+                // Volume comes from foVolumeData, features from foClickedData
+                const getSeriesData = (varName) => {
+                  if (varName === 'Volume') {
+                    return foVolumeData?.data?.filter(r => r.Actual != null).map(r => ({ date: r.Date, value: r.Actual })) || null
+                  }
+                  return foClickedData[varName] || null
+                }
+
+                const d1 = getSeriesData(rowVar)
+                const d2 = getSeriesData(colVar)
+                if (!d1 && !d2) return <p style={{ color: '#999', fontSize: 13, marginTop: 16 }}>Loading...</p>
+
+                // Align col variable to row variable dates by year-month
+                const varMap = d2 ? Object.fromEntries(d2.map(r => [r.date.substring(0, 7), r.value])) : {}
+                const traces = []
+                if (d1) traces.push({
+                  x: d1.map(r => r.date), y: d1.map(r => r.value),
+                  mode: 'lines', name: rowLabel, type: 'scatter',
+                  line: { color: '#41C185', width: 2, dash: 'solid' }
+                })
+                if (d1 && d2 && rowVar !== colVar) traces.push({
+                  x: d1.map(r => r.date), y: d1.map(r => varMap[r.date.substring(0, 7)] ?? null),
+                  mode: 'lines', name: colLabel, type: 'scatter',
+                  yaxis: 'y2', line: { color: '#FFBD59', width: 2, dash: 'solid' }
+                })
+
+                return (
+                  <div style={{ ...s.card, marginTop: 20 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#333333', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        📈 {rowLabel}{rowVar !== colVar ? ` vs ${colLabel}` : ''}
+                      </div>
+                      <button onClick={() => setFoClickedCell(null)}
+                        style={{ background: '#f5f5f5', border: '1px solid #e8e8e8', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12, color: '#666' }}>✕ Close</button>
+                    </div>
+                    <ChartPanel data={traces} layout={{
+                      title: '', xaxis: { title: { text: 'Date' } },
+                      yaxis: { title: { text: rowLabel } },
+                      yaxis2: rowVar !== colVar ? { title: { text: colLabel }, overlaying: 'y', side: 'right' } : undefined,
+                      legend: { orientation: 'h', y: -0.25 }, height: 360
+                    }} />
+                  </div>
+                )
+              })()}
+            </div>
+          )}
         </div>
       )}
 
@@ -654,7 +822,7 @@ export default function Dashboard() {
                         border: active ? '1px solid #4f46e5' : '1px solid #e2e8f0',
                         boxShadow: active ? '0 2px 6px rgba(79,70,229,0.3)' : 'none'
                       }}>
-                      {cleanVarName(row.Variable)}
+                      {displayVar(cleanVarName(row.Variable))}
                     </span>
                   )
                 })}
@@ -666,7 +834,7 @@ export default function Dashboard() {
               <div style={s.card}>
                 <DataTable
                   data={editedGrowthData.map(row => {
-                    const r = { Segment: row.Segment, Variable: cleanVarName(row.Variable) }
+                    const r = { Segment: row.Segment, Variable: displayVar(cleanVarName(row.Variable)) }
                     growthCols.filter(c => parseInt(c.split(' ')[0].slice(1)) >= 25).forEach(c => {
                       r[toFY(c)] = row[c] != null ? `${parseFloat(row[c]).toFixed(1)}%` : '-'
                     })
@@ -823,7 +991,7 @@ export default function Dashboard() {
                                 border: active ? '1px solid #4f46e5' : '1px solid #e2e8f0',
                                 boxShadow: active ? '0 2px 6px rgba(79,70,229,0.3)' : 'none'
                               }}>
-                              {v}
+                              {displayVar(cleanVarName(v))}
                             </span>
                           )
                         })}
@@ -874,7 +1042,7 @@ export default function Dashboard() {
             onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
               <div>
-                <div style={{ fontSize: 18, fontWeight: 800, color: '#1a1a2e' }}>📈 {cleanVarName(growthData[selectedGrowthRow].Variable)}</div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: '#1a1a2e' }}>📈 {displayVar(cleanVarName(growthData[selectedGrowthRow].Variable))}</div>
                 <div style={{ fontSize: 12, color: '#718096', marginTop: 3 }}>Segment: {growthData[selectedGrowthRow].Segment}</div>
               </div>
               <button onClick={() => setSelectedGrowthRow(null)}

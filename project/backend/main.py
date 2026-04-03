@@ -377,6 +377,94 @@ def get_feature_variable(variable: str):
     return {"data": records, "variable": variable}
 
 
+@app.get("/feature-overview/correlation-matrix")
+def get_correlation_matrix(segment: str):
+    vol_df = _store.get("volume_forecast_df")
+    feat_df = _store.get("consolidated_df")
+    feat_list = _store.get("feature_list_df")
+    if any(x is None for x in [vol_df, feat_df, feat_list]):
+        raise HTTPException(404, "Required files not loaded")
+
+    seg_vol = vol_df[vol_df["Segment"] == segment][["Date", "Actual"]].dropna().copy()
+    seg_vol["ym"] = pd.to_datetime(seg_vol["Date"]).dt.to_period("M").astype(str)
+
+    feat_df = feat_df.copy()
+    feat_df["ym"] = pd.to_datetime(feat_df["date"]).dt.to_period("M").astype(str)
+
+    # Build merged dataframe: Volume + all available features
+    merged = seg_vol[["ym", "Actual"]].rename(columns={"Actual": "Volume"})
+    display_map = {"Volume": "Volume"}
+
+    for _, frow in feat_list.iterrows():
+        var = frow["Variable name"]
+        display = frow["Edited variable name"]
+        if var not in feat_df.columns:
+            continue
+        tmp = feat_df[["ym", var]].dropna()
+        merged = merged.merge(tmp, on="ym", how="left")
+        display_map[var] = display
+
+    merged = merged.drop(columns=["ym"]).dropna()
+    if merged.shape[0] < 5:
+        raise HTTPException(400, "Not enough data for correlation matrix")
+
+    corr = merged.corr().round(3)
+    cols = corr.columns.tolist()
+    display_cols = [display_map.get(c, c) for c in cols]
+
+    import math
+    matrix = []
+    for row_col in cols:
+        row = []
+        for col_col in cols:
+            v = corr.loc[row_col, col_col]
+            row.append(None if (isinstance(v, float) and math.isnan(v)) else v)
+        matrix.append(row)
+
+    return {"columns": cols, "display_columns": display_cols, "matrix": matrix}
+
+
+@app.get("/feature-overview/correlations")
+def get_feature_correlations(segment: str):
+    vol_df = _store.get("volume_forecast_df")
+    feat_df = _store.get("consolidated_df")
+    feat_list = _store.get("feature_list_df")
+    if any(x is None for x in [vol_df, feat_df, feat_list]):
+        raise HTTPException(404, "Required files not loaded")
+
+    # Get actual volume for segment
+    seg_vol = vol_df[vol_df["Segment"] == segment][["Date", "Actual"]].dropna()
+    seg_vol = seg_vol.copy()
+    seg_vol["ym"] = pd.to_datetime(seg_vol["Date"]).dt.to_period("M").astype(str)
+
+    feat_df = feat_df.copy()
+    feat_df["ym"] = pd.to_datetime(feat_df["date"]).dt.to_period("M").astype(str)
+
+    import math
+    results = []
+    for _, frow in feat_list.iterrows():
+        var = frow["Variable name"]
+        display = frow["Edited variable name"]
+        cat = frow["Category"]
+        if var not in feat_df.columns:
+            continue
+        merged = seg_vol.merge(feat_df[["ym", var]], on="ym", how="inner").dropna()
+        if len(merged) < 5:
+            continue
+        vol_vals = merged["Actual"].values
+        feat_vals = merged[var].values
+        n = len(vol_vals)
+        mv = vol_vals.mean(); mf = feat_vals.mean()
+        num = ((vol_vals - mv) * (feat_vals - mf)).sum()
+        dv = ((vol_vals - mv) ** 2).sum() ** 0.5
+        df2 = ((feat_vals - mf) ** 2).sum() ** 0.5
+        corr = round(num / (dv * df2), 3) if dv * df2 != 0 else 0
+        results.append({"variable": var, "display_name": display, "category": cat, "correlation": corr})
+
+    results.sort(key=lambda x: abs(x["correlation"]), reverse=True)
+    return {"correlations": results}
+
+
 @app.get("/feature-overview/categories")
 def get_feature_categories():
     df = _store.get("feature_list_df")

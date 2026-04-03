@@ -4,6 +4,7 @@ import {
   Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   Legend, ReferenceLine, Cell
 } from 'recharts'
+import { displayVar } from '../api/variableLabels'
 
 const COLORS = ['#4f46e5', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6']
 
@@ -26,7 +27,7 @@ function CustomTooltip({ active, payload, label }) {
 }
 
 // ── Waterfall bar chart using Recharts Bar ────────────────────
-const cleanLabel = (s) => s.replace(/^(Res_|Lag_|lag_)/g, '').replace(/\bA(\d+)\b/g, 'FY$1').trim()
+const cleanLabel = (s) => displayVar(s.replace(/^(Res_|Lag_|lag_)/g, '').replace(/\bA(\d+)\b/g, 'FY$1').trim())
 function WaterfallChart({ data, height }) {
   // data: array of { Label, Type, DisplayValue, LabelText }
   // Build running base for stacked invisible bar
@@ -90,7 +91,7 @@ function WaterfallChart({ data, height }) {
 }
 
 // ── Main ChartPanel ───────────────────────────────────────────
-export default function ChartPanel({ data, layout, style }) {
+export default function ChartPanel({ data, layout, style, onCellClick }) {
   const height = layout?.height || 350
   const titleText = typeof layout?.title === 'string' ? layout.title : layout?.title?.text || ''
 
@@ -106,6 +107,116 @@ export default function ChartPanel({ data, layout, style }) {
       <div style={{ width: '100%', ...style }}>
         {titleText && <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a2e', marginBottom: 8, paddingLeft: 4 }}>{titleText}</div>}
         <WaterfallChart data={data[0]._rawData || []} height={height} />
+      </div>
+    )
+  }
+
+  // Heatmap
+  if (data[0]?.type === 'heatmap') {
+    const hm = data[0]
+    const labels = hm.x || []
+    const z = hm.z || []
+    const n = labels.length
+
+    // Use a ref to measure container width and fill it
+    const [containerW, setContainerW] = React.useState(600)
+    const containerRef = React.useRef(null)
+    React.useEffect(() => {
+      if (!containerRef.current) return
+      const obs = new ResizeObserver(entries => {
+        setContainerW(entries[0].contentRect.width || 600)
+      })
+      obs.observe(containerRef.current)
+      return () => obs.disconnect()
+    }, [])
+
+    const labelW = Math.min(180, Math.max(80, containerW * 0.22))
+    const gridW = containerW - labelW - 20
+    const cellSize = n > 0 ? Math.floor(gridW / n) : 40
+    const labelH = labelW  // rotated labels need same space
+    const totalH = labelH + n * cellSize + 10
+
+    const cellColor = (v) => {
+      if (v == null) return '#f0f0f0'
+      if (v >= 0) {
+        const g = Math.round(65 + (193 - 65) * v)
+        const rb = Math.round(255 - 190 * v)
+        return `rgb(${rb},${g},${rb})`
+      }
+      const r = Math.round(229 + (255 - 229) * (-v))
+      const gb = Math.round(255 - 193 * (-v))
+      return `rgb(${r},${gb},${gb})`
+    }
+
+    return (
+      <div ref={containerRef} style={{ width: '100%', overflowX: 'hidden', ...style }}>
+        {titleText && <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a2e', marginBottom: 8 }}>{titleText}</div>}
+        <svg width={containerW} height={totalH}>
+          {/* Y labels */}
+          {labels.map((lbl, i) => (
+            <text key={`yl${i}`} x={labelW - 6} y={labelH + i * cellSize + cellSize / 2 + 4}
+              textAnchor="end" fontSize={Math.max(9, Math.min(12, cellSize * 0.28))} fill="#333">{lbl}</text>
+          ))}
+          {/* X labels — rotated */}
+          {labels.map((lbl, i) => (
+            <text key={`xl${i}`} x={labelW + i * cellSize + cellSize / 2} y={labelH - 6}
+              textAnchor="start" fontSize={Math.max(9, Math.min(12, cellSize * 0.28))} fill="#333"
+              transform={`rotate(-45, ${labelW + i * cellSize + cellSize / 2}, ${labelH - 6})`}>{lbl}</text>
+          ))}
+          {/* Cells */}
+          {z.map((row, ri) => row.map((val, ci) => {
+            // Font size: scales with cell, capped between 9 and 14px
+            const fs = Math.max(9, Math.min(14, cellSize * 0.32))
+            // Text color: white on dark green/red, dark on light cells
+            const textColor = Math.abs(val ?? 0) > 0.4 ? '#ffffff' : '#1a1a2e'
+            return (
+              <g key={`${ri}-${ci}`}
+                onClick={() => onCellClick && onCellClick({ rowLabel: labels[ri], colLabel: labels[ci], rowIdx: ri, colIdx: ci, value: val })}
+                style={{ cursor: onCellClick ? 'pointer' : 'default' }}>
+                <rect x={labelW + ci * cellSize} y={labelH + ri * cellSize}
+                  width={cellSize} height={cellSize}
+                  fill={cellColor(val)} stroke="#fff" strokeWidth={1} />
+                {val != null && (
+                  <text x={labelW + ci * cellSize + cellSize / 2}
+                    y={labelH + ri * cellSize + cellSize / 2 + fs * 0.35}
+                    textAnchor="middle" fontSize={fs} fontWeight="600"
+                    fill={textColor}>
+                    {val.toFixed(2)}
+                  </text>
+                )}
+              </g>
+            )
+          }))}
+        </svg>
+      </div>
+    )
+  }
+
+  // Horizontal bar chart
+  if (data[0]?.type === 'bar' && data[0]?.orientation === 'h') {
+    const barData = data[0]
+    const chartH = layout?.height || 400
+    const marginL = layout?.margin?.l || 160
+    const items = (barData.y || []).map((label, i) => ({
+      label, value: (barData.x || [])[i] ?? 0,
+      color: Array.isArray(barData.marker?.color) ? barData.marker.color[i] : (barData.marker?.color || '#41C185')
+    }))
+    return (
+      <div style={{ width: '100%', ...style }}>
+        {titleText && <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a2e', marginBottom: 8, paddingLeft: 4 }}>{titleText}</div>}
+        <ResponsiveContainer width="100%" height={chartH}>
+          <ComposedChart layout="vertical" data={items} margin={{ top: 10, right: 40, bottom: 30, left: marginL }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR} horizontal={false} />
+            <XAxis type="number" domain={layout?.xaxis?.range || [-1, 1]} tick={AXIS_STYLE}
+              label={layout?.xaxis?.title?.text ? { value: layout.xaxis.title.text, position: 'insideBottom', offset: -10, fontSize: 12, fill: '#666666' } : undefined} />
+            <YAxis type="category" dataKey="label" tick={{ ...AXIS_STYLE, fontSize: 11 }} width={marginL - 10} />
+            <Tooltip content={<CustomTooltip />} />
+            <ReferenceLine x={0} stroke="#999999" strokeWidth={1} />
+            <Bar dataKey="value" isAnimationActive={false} name={barData.name || 'Value'}>
+              {items.map((d, i) => <Cell key={i} fill={d.color} />)}
+            </Bar>
+          </ComposedChart>
+        </ResponsiveContainer>
       </div>
     )
   }

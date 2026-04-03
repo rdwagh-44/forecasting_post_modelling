@@ -23,5 +23,7 @@ export const getVolumeOverviewSegments = () => api.get('/volume-overview/segment
 export const getVolumeOverviewData = (segment) => api.get('/volume-overview/data', { params: { segment } })
 export const getFeatureCategories = () => api.get('/feature-overview/categories')
 export const getFeatureVariable = (variable) => api.get('/feature-overview/variable', { params: { variable } })
+export const getFeatureCorrelations = (segment) => api.get('/feature-overview/correlations', { params: { segment } })
+export const getCorrelationMatrix = (segment) => api.get('/feature-overview/correlation-matrix', { params: { segment } })
 
 export default api
